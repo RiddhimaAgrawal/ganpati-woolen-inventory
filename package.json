@@ -1,0 +1,11 @@
+{
+  "name": "ganpati-woolen-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ganpati Woolen Industries stock manager (React frontend + Express/MySQL backend)",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "npm install --include=dev --prefix ganpati-frontend && npm run build --prefix ganpati-frontend && npm install --omit=dev --prefix ganpati-backend",
+    "start": "node ganpati-backend/server.js"
+  }
+}

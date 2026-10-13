@@ -1,0 +1,4 @@
+node_modules
+.env
+ganpati-frontend/dist
+*.log
