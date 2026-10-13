@@ -1,7 +1,12 @@
 // All communication with the Express backend lives here.
 // Dev (npm run dev): talk to the backend on port 5000.
 // Production build served by the backend itself: use the same address (relative URLs).
-const BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:5000' : '');
+
+const BASE = (
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? 'http://localhost:5000' : '')
+).replace(/\/+$/, '');
+
 
 const TOKEN_KEY = 'gw_token';
 export const getToken = () => {
