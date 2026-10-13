@@ -1,14 +1,20 @@
-const mysql = require('mysql2/promise');
-const { dbConfig, poolSize } = require('./env');
 
-const pool = mysql.createPool({
-  ...dbConfig,
-  waitForConnections: true,
-  connectionLimit: poolSize, // small on purpose: free cloud databases allow only a few connections
-  queueLimit: 0,
-  enableKeepAlive: true, // stops idle connections from being dropped by cloud databases
-  keepAliveInitialDelay: 10000,
-  dateStrings: true // return DATE columns as 'YYYY-MM-DD' (no timezone shifts)
+const { Pool } = require('pg');
+const { POSTGRES_URL, poolSize } = require('./env');
+
+const pool = new Pool({
+  connectionString: POSTGRES_URL,
+  max: poolSize || 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+
+  // Supabase PostgreSQL connections use TLS.
+  // Prefer certificate verification when your connection setup supports it.
+  ssl: { rejectUnauthorized: false },
+});
+
+pool.on('error', (err) => {
+  console.error('PostgreSQL pool error:', err.message);
 });
 
 module.exports = pool;

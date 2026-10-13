@@ -1,8 +1,12 @@
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const { dbConfig } = require('./src/config/env'); // loads .env
+
+require('./src/config/env');
+
+const pool = require('./src/config/db');
 
 const authRoutes = require('./src/routes/auth.routes');
 const usersRoutes = require('./src/routes/users.routes');
@@ -12,111 +16,181 @@ const salesRoutes = require('./src/routes/sales.routes');
 const paymentsRoutes = require('./src/routes/payments.routes');
 const customersRoutes = require('./src/routes/customers.routes');
 const dashboardRoutes = require('./src/routes/dashboard.routes');
+
 const { requireAuth } = require('./src/auth/middleware');
-const { verifyToken, secretWasGenerated } = require('./src/auth/token');
-const { ensureAdmin } = require('./src/auth/bootstrap');
-const { diagnose, dbHint } = require('./src/utils/dbHelp');
-const { initDatabase } = require('./src/config/initDb');
+const { verifyToken } = require('./src/auth/token');
 
 const app = express();
 
 app.disable('x-powered-by');
-app.set('trust proxy', 1); // behind a hosting provider's proxy (Render, Railway...) req.ip is the real visitor
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 1);
 
-// ---------- public routes ----------
+// Configure an explicit FRONTEND_URL in production.
+const allowedOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-// Health check. Anyone may ask "is it running?". The technical reason for a problem is only shown
-// to someone logged in, or to a request coming from the same computer.
-function maySeeDetails(req) {
-  const local = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress) && !req.headers['x-forwarded-for'];
-  if (local) return true;
-  const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
-  if (!m) return false;
-  try { verifyToken(m[1]); return true; } catch (e) { return false; }
+app.use(cors({
+  origin(origin, callback) {
+    // Allow requests without an Origin header (e.g. server-to-server checks).
+    if (!origin || allowedOrigins.length === 0 ||
+        allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Origin not allowed by CORS'));
+  },
+}));
+
+app.use(express.json({ limit: '1mb' }));
+
+const REQUIRED_TABLES = [
+  'customers',
+  'users',
+  'raw_imports',
+  'processing_batches',
+  'sales',
+  'payments',
+];
+
+async function checkDatabase() {
+  const result = await pool.query(
+    `SELECT table_name
+     FROM information_schema.tables
+     WHERE table_schema = 'public'
+       AND table_type = 'BASE TABLE'
+       AND table_name = ANY($1::text[])`,
+    [REQUIRED_TABLES]
+  );
+
+  const found = new Set(result.rows.map((row) => row.table_name));
+  const missing = REQUIRED_TABLES.filter((name) => !found.has(name));
+
+  if (missing.length > 0) {
+    const error = new Error(
+      `Missing Supabase tables: ${missing.join(', ')}`
+    );
+    error.code = 'MISSING_TABLES';
+    throw error;
+  }
+
+  return true;
 }
 
+function maySeeDetails(req) {
+  const local = [
+    '127.0.0.1',
+    '::1',
+    '::ffff:127.0.0.1',
+  ].includes(req.socket.remoteAddress) &&
+    !req.headers['x-forwarded-for'];
+
+  if (local) return true;
+
+  const match = /^Bearer (.+)$/.exec(
+    req.headers.authorization || ''
+  );
+
+  if (!match) return false;
+
+  try {
+    verifyToken(match[1]);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Public health endpoint
 app.get('/api/health', async (req, res) => {
-  const db = await diagnose();
-  const details = maySeeDetails(req);
-  res.status(db.ok ? 200 : 500).json({
-    server: 'running',
-    database: db.ok ? 'connected, all tables found' : 'PROBLEM',
-    problem: db.ok || !details ? undefined : db.message,
-    code: db.ok || !details ? undefined : db.code
-  });
+  try {
+    await checkDatabase();
+
+    return res.status(200).json({
+      server: 'running',
+      database: 'connected, all required tables found',
+    });
+  } catch (err) {
+    console.error('Database health check failed:', err.message);
+
+    const details = maySeeDetails(req);
+
+    return res.status(500).json({
+      server: 'running',
+      database: 'PROBLEM',
+      ...(details ? {
+        problem: err.message,
+        code: err.code || 'DATABASE_ERROR',
+      } : {}),
+    });
+  }
 });
 
-app.use('/api/auth', authRoutes); // login is public; the other auth routes check the login themselves
+// Authentication routes
+app.use('/api/auth', authRoutes);
 
-// ---------- everything below needs a login ----------
+// All following API routes require authentication.
 app.use('/api', requireAuth);
-app.use('/api/users', usersRoutes); // admin only (checked inside)
+
+app.use('/api/users', usersRoutes);
 app.use('/api/raw-imports', rawImportsRoutes);
 app.use('/api/processing', processingRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 
-// Serve the built React app (run `npm run build` inside ../ganpati-frontend first).
-// This lets the whole system run from one address, e.g. http://localhost:5000
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Optional frontend serving for combined deployments.
 const distDir = path.join(__dirname, '..', 'ganpati-frontend', 'dist');
+
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));
-  app.get(/^\/(?!api).*/, (req, res) => res.sendFile(path.join(distDir, 'index.html')));
+
+  app.get(/^\/(?!api).*/, (req, res) => {
+    res.sendFile(path.join(distDir, 'index.html'));
+  });
 }
 
-// Basic error handler for anything that slips through
 app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Something went wrong' });
+  console.error('Request error:', err.message);
+
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  return res.status(
+    err.message === 'Origin not allowed by CORS' ? 403 : 500
+  ).json({
+    error: err.message === 'Origin not allowed by CORS'
+      ? 'Origin not allowed'
+      : 'Something went wrong',
+  });
 });
 
 const PORT = process.env.PORT || 5000;
 
-async function prepareDatabase() {
-  if (!dbConfig.user || !dbConfig.database) {
-    console.log('\n⚠️  No database settings found.');
-    console.log('   Create a file named .env inside the ganpati-backend folder (copy .env.example to .env),');
-    console.log('   fill in DB_USER, DB_PASSWORD and DB_NAME (or DATABASE_URL), then restart.\n');
-    return;
-  }
-  try {
-    const report = await initDatabase();
-    for (const col of report.addedColumns) console.log(`   + added column ${col}`);
-    if (report.archived.length) {
-      console.log('\n⚠️  Some tables in your database were made for a different design than this app.');
-      console.log('   NOTHING WAS DELETED. They were renamed as a backup, and correct new tables were created:');
-      for (const a of report.archived) {
-        const why = [
-          a.missing.length ? `missing columns: ${a.missing.join(', ')}` : '',
-          a.mustFill.length ? `extra required columns: ${a.mustFill.join(', ')}` : ''
-        ].filter(Boolean).join('; ');
-        console.log(`   - ${a.table}  ->  ${a.backup}   (${why})`);
-      }
-      console.log('');
-    }
-    const check = await diagnose();
-    if (!check.ok) throw Object.assign(new Error(check.message), { code: check.code });
-    console.log('✅ Database ready: connected, and all tables are in place.');
+const server = app.listen(PORT, '0.0.0.0', async () => {
+  console.log(`Cloud backend listening on port ${PORT}`);
 
-    const admin = await ensureAdmin();
-    if (admin.message) console.log(`${admin.created ? '👤' : '⚠️ '} ${admin.message}`);
-    if (secretWasGenerated) {
-      console.log('⚠️  JWT_SECRET is not set, so everyone will have to log in again whenever the server restarts.');
-      console.log('   Set JWT_SECRET to any long random text to stay logged in.');
-    }
+  try {
+    await checkDatabase();
+    console.log('Supabase PostgreSQL connection and required tables verified.');
   } catch (err) {
-    console.log('\n❌ DATABASE PROBLEM: ' + (dbHint(err) || err.message));
-    console.log('   (technical code: ' + (err.code || 'n/a') + ')');
-    console.log('   Fix this, then stop (Ctrl+C) and start the server again.\n');
+    console.error('Supabase check failed:', err.message);
   }
+});
+
+async function shutdown() {
+  server.close(async () => {
+    await pool.end();
+    process.exit(0);
+  });
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  prepareDatabase();
-});
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
