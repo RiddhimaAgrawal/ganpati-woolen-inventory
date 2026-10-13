@@ -54,6 +54,12 @@ const REQUIRED_TABLES = [
 ];
 
 async function checkDatabase() {
+  const { configError } = require('./src/config/env');
+  if (configError) {
+    const e = new Error(configError);
+    e.code = 'BAD_CONFIG';
+    throw e;
+  }
   const result = await pool.query(
     `SELECT table_name
      FROM information_schema.tables
@@ -103,7 +109,13 @@ function maySeeDetails(req) {
 
 // Friendly root page (the backend only serves /api/* routes)
 app.get('/', (req, res) => {
-  res.json({ name: 'Ganpati Woolen API', status: 'running', health: '/api/health' });
+  const { configError } = require('./src/config/env');
+  res.json({
+    name: 'Ganpati Woolen API',
+    status: 'running',
+    health: '/api/health',
+    ...(configError ? { configError } : {}),
+  });
 });
 
 // Public health endpoint
