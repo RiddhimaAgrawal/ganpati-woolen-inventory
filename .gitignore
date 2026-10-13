@@ -1,4 +1,14 @@
-node_modules
-.env
 ganpati-frontend/dist
+node_modules/
+.env
+.env.*
+!.env.example
 *.log
+dist/
+build/
+coverage/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+

@@ -1,0 +1,23 @@
+{
+  "name": "ganpati-woolen-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Ganpati Woolen Industries \u2014 tracks raw fiber/wool imports, processing, sales, payments and stock.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "create-user": "node scripts/createUser.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
