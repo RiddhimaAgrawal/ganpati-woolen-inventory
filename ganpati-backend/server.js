@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -102,6 +101,11 @@ function maySeeDetails(req) {
   }
 }
 
+// Friendly root page (the backend only serves /api/* routes)
+app.get('/', (req, res) => {
+  res.json({ name: 'Ganpati Woolen API', status: 'running', health: '/api/health' });
+});
+
 // Public health endpoint
 app.get('/api/health', async (req, res) => {
   try {
@@ -194,3 +198,5 @@ async function shutdown() {
 
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
+
+module.exports = app;

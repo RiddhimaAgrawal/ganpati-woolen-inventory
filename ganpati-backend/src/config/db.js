@@ -1,15 +1,20 @@
-
 const { Pool } = require('pg');
-const { POSTGRES_URL, poolSize } = require('./env');
+const { dbConfig, poolSize } = require('./env');
+
+// On Vercel every request may run in its own short-lived instance,
+// so keep the pool tiny to avoid exhausting Supabase connections.
+const max = process.env.VERCEL ? 1 : poolSize || 5;
 
 const pool = new Pool({
-  connectionString: POSTGRES_URL,
-  max: poolSize || 5,
+  host: dbConfig.host,
+  port: dbConfig.port,
+  user: dbConfig.user,
+  password: dbConfig.password,
+  database: dbConfig.database,
+  max,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000,
-
-  // Supabase PostgreSQL connections use TLS.
-  // Prefer certificate verification when your connection setup supports it.
+  // Supabase requires TLS.
   ssl: { rejectUnauthorized: false },
 });
 

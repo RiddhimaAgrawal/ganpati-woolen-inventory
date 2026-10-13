@@ -1,4 +1,3 @@
-
 const pool = require('../config/db');
 
 const REQUIRED_TABLES = [
@@ -30,6 +29,8 @@ function dbHint(err) {
     case 'ETIMEDOUT':
     case 'ENOTFOUND':
     case 'EHOSTUNREACH':
+    case 'ENETUNREACH':
+    case 'EAI_AGAIN':
       return 'Cannot reach PostgreSQL. Check the Supabase connection URL, network access, and database availability.';
     default:
       return null;

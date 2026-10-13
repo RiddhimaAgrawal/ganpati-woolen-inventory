@@ -1,4 +1,3 @@
-
 const pool = require('../config/db');
 const { sendError } = require('../utils/dbHelp');
 const {
@@ -50,7 +49,7 @@ const user = result.rows[0];
 
 if (!user) {
   return res.status(401).json({
-    message: 'Wrong username or password'
+    error: 'Wrong username or password'
   });
 }
 
@@ -61,7 +60,7 @@ const passwordMatches = await checkPassword(
 
 if (!passwordMatches) {
   return res.status(401).json({
-    message: 'Wrong username or password'
+    error: 'Wrong username or password'
   });
 }
 
