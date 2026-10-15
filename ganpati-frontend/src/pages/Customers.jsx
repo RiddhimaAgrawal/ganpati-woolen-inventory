@@ -3,8 +3,76 @@ import { api } from '../api.js';
 import { useLoad } from '../hooks.js';
 import { useLang } from '../i18n.jsx';
 import { useToast } from '../components/Toast.jsx';
-import { Empty, ErrorBox, Loading, PageHeader } from '../components/ui.jsx';
+import { ConfirmDelete, Empty, ErrorBox, Loading, Modal, PageHeader, RowActions } from '../components/ui.jsx';
 import { errMsg, telLink } from '../utils.js';
+
+// Pop-up form to change a customer's details
+function EditCustomer({ row, onClose, onSaved }) {
+  const { t } = useLang();
+  const toast = useToast();
+  const [form, setForm] = useState({
+    name: row.name || '',
+    phone: row.phone || '',
+    email: row.email || '',
+    address: row.address || ''
+  });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  async function save(e) {
+    e.preventDefault();
+    if (!form.name.trim()) return toast(t('cust.nameReq'), 'err');
+    setBusy(true);
+    try {
+      await api.updateCustomer(row.id, {
+        name: form.name.trim(),
+        phone: form.phone.trim() || undefined,
+        email: form.email.trim() || undefined,
+        address: form.address.trim() || undefined
+      });
+      toast(t('common.edited'));
+      onSaved();
+    } catch (err) {
+      toast(errMsg(err, t), 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={t('cust.editTitle')} onClose={onClose}>
+      <form className="form" onSubmit={save}>
+        <label className="field">
+          <span>{t('cust.name')}</span>
+          <input value={form.name} onChange={set('name')} />
+        </label>
+        <div className="two">
+          <label className="field">
+            <span>
+              {t('cust.phone')} <em>{t('common.optional')}</em>
+            </span>
+            <input type="tel" value={form.phone} onChange={set('phone')} />
+          </label>
+          <label className="field">
+            <span>
+              {t('cust.email')} <em>{t('common.optional')}</em>
+            </span>
+            <input type="email" value={form.email} onChange={set('email')} />
+          </label>
+        </div>
+        <label className="field">
+          <span>
+            {t('cust.address')} <em>{t('common.optional')}</em>
+          </span>
+          <input value={form.address} onChange={set('address')} />
+        </label>
+        <button className="btn" disabled={busy}>
+          {busy ? '…' : `✔ ${t('common.saveChanges')}`}
+        </button>
+      </form>
+    </Modal>
+  );
+}
 
 export default function Customers() {
   const { t } = useLang();
@@ -14,6 +82,9 @@ export default function Customers() {
   const [form, setForm] = useState({ name: '', phone: '', email: '', address: '' });
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [delBusy, setDelBusy] = useState(false);
 
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox error={error} onRetry={reload} />;
@@ -38,6 +109,21 @@ export default function Customers() {
       toast(errMsg(err, t), 'err');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function doDelete() {
+    setDelBusy(true);
+    try {
+      await api.deleteCustomer(deleting.id);
+      toast(t('common.deleted'));
+      setDeleting(null);
+      reload();
+    } catch (err) {
+      toast(errMsg(err, t), 'err');
+      setDeleting(null);
+    } finally {
+      setDelBusy(false);
     }
   }
 
@@ -100,6 +186,7 @@ export default function Customers() {
                     </div>
                   )}
                   {c.address && <div className="meta">{c.address}</div>}
+                  <RowActions onEdit={() => setEditing(c)} onDelete={() => setDeleting(c)} />
                 </div>
                 {tel && (
                   <a className="btn small secondary" href={tel} aria-label="Call">
@@ -110,6 +197,24 @@ export default function Customers() {
             );
           })}
         </div>
+      )}
+
+      {editing && (
+        <EditCustomer
+          row={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            reload();
+          }}
+        />
+      )}
+
+      {deleting && (
+        <ConfirmDelete busy={delBusy} onCancel={() => setDeleting(null)} onConfirm={doDelete}>
+          <p className="confirm-what">{deleting.name}</p>
+          <p className="hint">{t('cust.deleteWarn')}</p>
+        </ConfirmDelete>
       )}
     </>
   );

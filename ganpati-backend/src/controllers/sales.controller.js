@@ -2,6 +2,7 @@
 const pool = require('../config/db');
 const { sendError } = require('../utils/dbHelp');
 const { cleanText } = require('../utils/text');
+const { AppError, replyError, parseId, stockTransaction } = require('../utils/stock');
 
 async function getFinishedStockRemaining(material_type, sub_type, client = pool) {
   const result = await client.query(
@@ -204,8 +205,116 @@ async function listSales(req, res) {
   }
 }
 
+function readSaleBody(body) {
+  const { customer_id, bill_no, material_type, sub_type, quantity_kg, rate_per_kg, sale_date, due_date } = body || {};
+  const customerId = Number(customer_id);
+  const quantity = Number(quantity_kg);
+  const rate = Number(rate_per_kg);
+  const subtype = typeof sub_type === 'string' ? sub_type.trim() : '';
+
+  if (!customer_id || !material_type || !subtype || quantity_kg == null || rate_per_kg == null ||
+      !sale_date || !due_date) {
+    throw new AppError(400, 'customer_id, material_type, sub_type, quantity_kg, rate_per_kg, sale_date and due_date are required');
+  }
+  if (!Number.isInteger(customerId) || customerId <= 0 || !Number.isFinite(quantity) || quantity <= 0 ||
+      !Number.isFinite(rate) || rate < 0) {
+    throw new AppError(400, 'customer_id must be valid, quantity must be positive, and rate cannot be negative');
+  }
+  if (!['FIBER', 'WOOL'].includes(material_type)) {
+    throw new AppError(400, "material_type must be 'FIBER' or 'WOOL'");
+  }
+
+  return {
+    customerId,
+    bill_no: cleanText(bill_no, 60) || null,
+    material_type,
+    sub_type: subtype,
+    quantity,
+    rate,
+    sale_date,
+    due_date,
+  };
+}
+
+// PUT /api/sales/:id
+async function updateSale(req, res) {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) throw new AppError(400, 'Invalid id');
+    const v = readSaleBody(req.body);
+
+    const found = await pool.query(
+      'SELECT material_type, sub_type FROM sales WHERE id = $1',
+      [id]
+    );
+    if (found.rows.length === 0) throw new AppError(404, 'Sale not found');
+
+    const row = await stockTransaction([found.rows[0], v], async (client) => {
+      // Same lock the payments screen uses, so the paid amount cannot change under us.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1), $2::integer)', ['payment', id]);
+
+      const cust = await client.query('SELECT name FROM customers WHERE id = $1', [v.customerId]);
+      if (cust.rows.length === 0) throw new AppError(404, 'Customer not found');
+
+      const paid = await client.query(
+        'SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE sale_id = $1',
+        [id]
+      );
+      const newTotal = v.quantity * v.rate;
+      if (newTotal < Number(paid.rows[0].paid) - 0.005) {
+        throw new AppError(
+          400,
+          `The new total (${newTotal}) is less than the ${Number(paid.rows[0].paid)} already received for this sale.`
+        );
+      }
+
+      const r = await client.query(
+        `UPDATE sales
+            SET customer_id = $1, bill_no = $2, material_type = $3, sub_type = $4,
+                quantity_kg = $5, rate_per_kg = $6, sale_date = $7, due_date = $8
+          WHERE id = $9
+          RETURNING *`,
+        [v.customerId, v.bill_no, v.material_type, v.sub_type, v.quantity, v.rate, v.sale_date, v.due_date, id]
+      );
+      if (r.rows.length === 0) throw new AppError(404, 'Sale not found');
+      return { ...r.rows[0], customer_name: cust.rows[0].name };
+    });
+
+    return res.json(row);
+  } catch (err) {
+    return replyError(res, err, 'Failed to update sale');
+  }
+}
+
+// DELETE /api/sales/:id   (any payments recorded against the sale are deleted with it)
+async function deleteSale(req, res) {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) throw new AppError(400, 'Invalid id');
+
+    const found = await pool.query(
+      'SELECT material_type, sub_type FROM sales WHERE id = $1',
+      [id]
+    );
+    if (found.rows.length === 0) throw new AppError(404, 'Sale not found');
+
+    const removed = await stockTransaction([found.rows[0]], async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1), $2::integer)', ['payment', id]);
+      const pay = await client.query('DELETE FROM payments WHERE sale_id = $1', [id]);
+      await client.query('DELETE FROM sales WHERE id = $1', [id]);
+      return pay.rowCount;
+    });
+
+    return res.json({ ok: true, payments_deleted: removed });
+  } catch (err) {
+    return replyError(res, err, 'Failed to delete sale');
+  }
+}
+
 module.exports = {
   createSale,
   listSales,
   getFinishedStockRemaining,
+  updateSale,
+  deleteSale,
 };

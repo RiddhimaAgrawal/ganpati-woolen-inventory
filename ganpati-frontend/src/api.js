@@ -57,6 +57,37 @@ async function request(path, { method = 'GET', body } = {}) {
   return data;
 }
 
+// Downloads a file (used for the Excel report). Returns the file as a Blob.
+async function download(path) {
+  const headers = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, { headers });
+  } catch {
+    const err = new Error('NETWORK');
+    err.code = 'NETWORK';
+    throw err;
+  }
+
+  if (!res.ok) {
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      /* not JSON */
+    }
+    const err = new Error((data && data.error) || `Request failed (${res.status})`);
+    err.code = 'API';
+    err.status = res.status;
+    if (res.status === 401) window.dispatchEvent(new Event('gw:unauthorized'));
+    throw err;
+  }
+  return res.blob();
+}
+
 const qs = (params = {}) => {
   const q = new URLSearchParams(
     Object.entries(params).filter(([, v]) => v !== undefined && v !== '')
@@ -69,15 +100,26 @@ export const api = {
 
   customers: () => request('/api/customers'),
   addCustomer: (body) => request('/api/customers', { method: 'POST', body }),
+  updateCustomer: (id, body) => request(`/api/customers/${id}`, { method: 'PUT', body }),
+  deleteCustomer: (id) => request(`/api/customers/${id}`, { method: 'DELETE' }),
 
   imports: () => request('/api/raw-imports'),
   addImport: (body) => request('/api/raw-imports', { method: 'POST', body }),
+  updateImport: (id, body) => request(`/api/raw-imports/${id}`, { method: 'PUT', body }),
+  deleteImport: (id) => request(`/api/raw-imports/${id}`, { method: 'DELETE' }),
 
   processing: () => request('/api/processing'),
   addProcessing: (body) => request('/api/processing', { method: 'POST', body }),
+  updateProcessing: (id, body) => request(`/api/processing/${id}`, { method: 'PUT', body }),
+  deleteProcessing: (id) => request(`/api/processing/${id}`, { method: 'DELETE' }),
 
   sales: (params) => request(`/api/sales${qs(params)}`),
   addSale: (body) => request('/api/sales', { method: 'POST', body }),
+  updateSale: (id, body) => request(`/api/sales/${id}`, { method: 'PUT', body }),
+  deleteSale: (id) => request(`/api/sales/${id}`, { method: 'DELETE' }),
+
+  // Excel report. month = 'YYYY-MM', or leave empty for all data.
+  exportExcel: (month) => download(`/api/export/excel${qs({ month })}`),
 
   // login & team
   login: (username, password) => request('/api/auth/login', { method: 'POST', body: { username, password } }),

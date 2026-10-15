@@ -2,6 +2,7 @@
 const pool = require('../config/db');
 const { sendError } = require('../utils/dbHelp');
 const { cleanText } = require('../utils/text');
+const { AppError, replyError, parseId, stockTransaction } = require('../utils/stock');
 
 // Must be called using the same transaction client as the write.
 async function getRawStockRemaining(material_type, sub_type, client = pool) {
@@ -172,8 +173,96 @@ async function listProcessingBatches(req, res) {
   }
 }
 
+function readBatchBody(body) {
+  const { material_type, sub_type, batch_no, input_qty_kg, output_qty_kg, processing_cost, processing_date } = body || {};
+  const subtype = typeof sub_type === 'string' ? sub_type.trim() : '';
+  const inputQty = Number(input_qty_kg);
+  const outputQty = Number(output_qty_kg);
+  const cost = processing_cost == null || processing_cost === '' ? 0 : Number(processing_cost);
+
+  if (!material_type || !subtype || input_qty_kg == null || output_qty_kg == null || !processing_date) {
+    throw new AppError(400, 'material_type, sub_type, input_qty_kg, output_qty_kg and processing_date are required');
+  }
+  if (!['FIBER', 'WOOL'].includes(material_type)) {
+    throw new AppError(400, "material_type must be 'FIBER' or 'WOOL'");
+  }
+  if (!Number.isFinite(inputQty) || inputQty <= 0 || !Number.isFinite(outputQty) || outputQty <= 0 ||
+      !Number.isFinite(cost) || cost < 0) {
+    throw new AppError(400, 'Quantities must be positive and processing cost cannot be negative');
+  }
+  if (outputQty > inputQty) {
+    throw new AppError(400, 'output_qty_kg cannot exceed input_qty_kg');
+  }
+
+  return {
+    material_type,
+    sub_type: subtype,
+    batch_no: cleanText(batch_no, 60) || null,
+    inputQty,
+    outputQty,
+    cost,
+    processing_date,
+  };
+}
+
+// PUT /api/processing/:id
+async function updateProcessingBatch(req, res) {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) throw new AppError(400, 'Invalid id');
+    const v = readBatchBody(req.body);
+
+    const found = await pool.query(
+      'SELECT material_type, sub_type FROM processing_batches WHERE id = $1',
+      [id]
+    );
+    if (found.rows.length === 0) throw new AppError(404, 'Processing entry not found');
+
+    const row = await stockTransaction([found.rows[0], v], async (client) => {
+      const r = await client.query(
+        `UPDATE processing_batches
+            SET material_type = $1, sub_type = $2, batch_no = $3, input_qty_kg = $4,
+                output_qty_kg = $5, processing_cost = $6, processing_date = $7
+          WHERE id = $8
+          RETURNING *`,
+        [v.material_type, v.sub_type, v.batch_no, v.inputQty, v.outputQty, v.cost, v.processing_date, id]
+      );
+      if (r.rows.length === 0) throw new AppError(404, 'Processing entry not found');
+      return r.rows[0];
+    });
+
+    return res.json(row);
+  } catch (err) {
+    return replyError(res, err, 'Failed to update processing entry');
+  }
+}
+
+// DELETE /api/processing/:id
+async function deleteProcessingBatch(req, res) {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) throw new AppError(400, 'Invalid id');
+
+    const found = await pool.query(
+      'SELECT material_type, sub_type FROM processing_batches WHERE id = $1',
+      [id]
+    );
+    if (found.rows.length === 0) throw new AppError(404, 'Processing entry not found');
+
+    await stockTransaction([found.rows[0]], async (client) => {
+      await client.query('DELETE FROM processing_batches WHERE id = $1', [id]);
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return replyError(res, err, 'Failed to delete processing entry');
+  }
+}
+
 module.exports = {
   createProcessingBatch,
   listProcessingBatches,
   getRawStockRemaining,
+  updateProcessingBatch,
+  deleteProcessingBatch,
 };

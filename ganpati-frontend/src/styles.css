@@ -339,3 +339,9 @@ input:focus, select:focus { outline: none; border-color: var(--accent); box-shad
 .btn.danger-solid { background: var(--red); }
 .btn.danger-solid:hover { background: #a93226; }
 .team-list { margin-top: 10px; }
+
+/* ───────── Edit / delete buttons, Excel download ───────── */
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.row-actions .btn { min-height: 40px; padding: 6px 14px; font-size: 0.92rem; }
+.confirm-what { font-weight: 700; }
+.export-card .seg { margin-bottom: 4px; }

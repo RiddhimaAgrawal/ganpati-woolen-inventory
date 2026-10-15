@@ -92,3 +92,39 @@ export function Empty({ text, children }) {
     </div>
   );
 }
+
+// ✏️ Edit / 🗑 Delete buttons shown under an entry in a list
+export function RowActions({ onEdit, onDelete }) {
+  const { t } = useLang();
+  return (
+    <div className="row-actions">
+      <button type="button" className="btn small secondary" onClick={onEdit}>
+        ✏️ {t('common.edit')}
+      </button>
+      <button type="button" className="btn small secondary danger-btn" onClick={onDelete}>
+        🗑 {t('common.delete')}
+      </button>
+    </div>
+  );
+}
+
+// "Are you sure?" box shown before deleting. `children` describes what will be deleted.
+export function ConfirmDelete({ title, children, busy, onCancel, onConfirm }) {
+  const { t } = useLang();
+  return (
+    <Modal title={title || t('common.deleteTitle')} onClose={onCancel}>
+      <div className="form">
+        {children}
+        <p className="hint">{t('common.deleteWarn')}</p>
+        <div className="btn-row">
+          <button type="button" className="btn secondary" onClick={onCancel}>
+            {t('common.cancel')}
+          </button>
+          <button type="button" className="btn danger-solid" onClick={onConfirm} disabled={busy}>
+            {busy ? '…' : `🗑 ${t('common.delete')}`}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}

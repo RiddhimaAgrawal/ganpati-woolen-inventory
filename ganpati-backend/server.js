@@ -15,6 +15,7 @@ const salesRoutes = require('./src/routes/sales.routes');
 const paymentsRoutes = require('./src/routes/payments.routes');
 const customersRoutes = require('./src/routes/customers.routes');
 const dashboardRoutes = require('./src/routes/dashboard.routes');
+const exportRoutes = require('./src/routes/export.routes');
 
 const { requireAuth } = require('./src/auth/middleware');
 const { verifyToken } = require('./src/auth/token');
@@ -156,6 +157,7 @@ app.use('/api/sales', salesRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/export', exportRoutes);
 
 app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Not found' });

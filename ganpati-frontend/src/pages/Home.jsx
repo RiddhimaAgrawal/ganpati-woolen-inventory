@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { useLoad } from '../hooks.js';
 import { useLang } from '../i18n.jsx';
 import { Empty, ErrorBox, Loading, PageHeader } from '../components/ui.jsx';
+import ExportCard from '../components/ExportCard.jsx';
 import { fmtKg, num, typeKey, typeLabel } from '../utils.js';
 
 export default function Home() {
@@ -71,6 +72,9 @@ export default function Home() {
           </Link>
         ))}
       </div>
+
+      <h2 className="section">📊 {t('export.title')}</h2>
+      <ExportCard />
 
       <h2 className="section">{t('home.byType')}</h2>
 

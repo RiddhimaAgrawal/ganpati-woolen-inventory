@@ -3,8 +3,104 @@ import { api } from '../api.js';
 import { useLoad } from '../hooks.js';
 import { useLang } from '../i18n.jsx';
 import { useToast } from '../components/Toast.jsx';
-import { Empty, ErrorBox, Loading, PageHeader, Segmented } from '../components/ui.jsx';
+import { ConfirmDelete, Empty, ErrorBox, Loading, Modal, PageHeader, RowActions, Segmented } from '../components/ui.jsx';
 import { errMsg, fmtDate, fmtKg, fmtRupees, num, searchRows, todayStr, typeLabel } from '../utils.js';
+
+// Pop-up form to change an existing purchase
+function EditImport({ row, stock, onClose, onSaved }) {
+  const { t } = useLang();
+  const toast = useToast();
+  const [material, setMaterial] = useState(row.material_type);
+  const [sub, setSub] = useState(row.sub_type);
+  const [qty, setQty] = useState(String(Number(row.quantity_kg)));
+  const [rate, setRate] = useState(String(Number(row.rate_per_kg)));
+  const [supplier, setSupplier] = useState(row.supplier_name || '');
+  const [lc, setLc] = useState(row.lc_no || '');
+  const [date, setDate] = useState(String(row.import_date).slice(0, 10));
+  const [busy, setBusy] = useState(false);
+
+  const suggestions = [...new Set((stock || []).filter((r) => r.material_type === material).map((r) => r.sub_type))];
+  const ready = material && sub.trim() && num(qty) > 0 && num(rate) > 0 && date;
+
+  async function save(e) {
+    e.preventDefault();
+    if (!ready) return toast(t('common.fillAll'), 'err');
+    setBusy(true);
+    try {
+      await api.updateImport(row.id, {
+        material_type: material,
+        sub_type: sub.trim(),
+        quantity_kg: num(qty),
+        rate_per_kg: num(rate),
+        supplier_name: supplier.trim() || undefined,
+        lc_no: lc.trim() || undefined,
+        import_date: date
+      });
+      toast(t('common.edited'));
+      onSaved();
+    } catch (err) {
+      toast(errMsg(err, t), 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={t('buy.editTitle')} onClose={onClose}>
+      <form className="form" onSubmit={save}>
+        <div className="field">
+          <span>{t('common.whatKind')}</span>
+          <Segmented
+            value={material}
+            onChange={setMaterial}
+            options={[
+              { value: 'FIBER', label: `🌿 ${t('common.fiber')}` },
+              { value: 'WOOL', label: `🐑 ${t('common.wool')}` }
+            ]}
+          />
+        </div>
+        <label className="field">
+          <span>{t('common.typeName')}</span>
+          <input list="edit-sub-types" value={sub} onChange={(e) => setSub(e.target.value)} autoComplete="off" />
+          <datalist id="edit-sub-types">
+            {suggestions.map((x) => (
+              <option key={x} value={x} />
+            ))}
+          </datalist>
+        </label>
+        <div className="two">
+          <label className="field">
+            <span>{t('buy.qty')}</span>
+            <input type="number" inputMode="decimal" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)} />
+          </label>
+          <label className="field">
+            <span>{t('buy.rate')}</span>
+            <input type="number" inputMode="decimal" min="0" step="any" value={rate} onChange={(e) => setRate(e.target.value)} />
+          </label>
+        </div>
+        <label className="field">
+          <span>
+            {t('buy.supplier')} <em>{t('common.optional')}</em>
+          </span>
+          <input value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>
+            {t('buy.lc')} <em>{t('common.optional')}</em>
+          </span>
+          <input value={lc} onChange={(e) => setLc(e.target.value)} autoComplete="off" />
+        </label>
+        <label className="field">
+          <span>{t('buy.date')}</span>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <button className="btn" disabled={busy}>
+          {busy ? '…' : `✔ ${t('common.saveChanges')}`}
+        </button>
+      </form>
+    </Modal>
+  );
+}
 
 export default function BuyMaterial() {
   const { t } = useLang();
@@ -21,6 +117,9 @@ export default function BuyMaterial() {
   const [find, setFind] = useState('');
   const [date, setDate] = useState(todayStr());
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [delBusy, setDelBusy] = useState(false);
 
   const suggestions = [
     ...new Set((stockQ.data || []).filter((r) => r.material_type === material).map((r) => r.sub_type))
@@ -30,6 +129,21 @@ export default function BuyMaterial() {
   const shown = listQ.data
     ? searchRows(listQ.data, find, (r) => [r.lc_no, r.sub_type, r.supplier_name, r.material_type].join(' '))
     : [];
+
+  async function doDelete() {
+    setDelBusy(true);
+    try {
+      await api.deleteImport(deleting.id);
+      toast(t('common.deleted'));
+      setDeleting(null);
+      listQ.reload();
+      stockQ.reload();
+    } catch (err) {
+      toast(errMsg(err, t), 'err');
+    } finally {
+      setDelBusy(false);
+    }
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -161,11 +275,33 @@ export default function BuyMaterial() {
                     {t('common.perKg')} · <b>{fmtRupees(r.total_cost)}</b> · {fmtDate(r.import_date)}
                     {r.supplier_name ? ` · ${t('buy.from', { name: r.supplier_name })}` : ''}
                   </div>
+                  <RowActions onEdit={() => setEditing(r)} onDelete={() => setDeleting(r)} />
                 </div>
               ))}
             </div>
           )}
         </>
+      )}
+
+      {editing && (
+        <EditImport
+          row={editing}
+          stock={stockQ.data}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            listQ.reload();
+            stockQ.reload();
+          }}
+        />
+      )}
+
+      {deleting && (
+        <ConfirmDelete busy={delBusy} onCancel={() => setDeleting(null)} onConfirm={doDelete}>
+          <p className="confirm-what">
+            {fmtKg(deleting.quantity_kg)} · {typeLabel(t, deleting.material_type, deleting.sub_type)} · {fmtDate(deleting.import_date)}
+          </p>
+        </ConfirmDelete>
       )}
     </>
   );
